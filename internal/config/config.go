@@ -14,7 +14,7 @@ type Config struct {
 // ServerConfig holds the HTTP server configuration
 type ServerConfig struct {
 	Host string `mapstructure:"host"`
-	Port uint16 `mapstructure:"port"`
+	Port uint   `mapstructure:"port"`
 }
 
 // Load reads configuration from viper and returns a Config struct

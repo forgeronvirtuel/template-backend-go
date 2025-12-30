@@ -1,4 +1,5 @@
-package cmd
+package integration
+package integration
 
 import (
 	"context"
@@ -10,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"template-backend-go/cmd"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -26,17 +29,17 @@ func TestServerIntegration(t *testing.T) {
 	port := findFreePort(t)
 
 	// Create command with test flags
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", port, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
+	cobraCmd.Flags().Uint16P("port", "p", port, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
 
 	// Run server in goroutine
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- runServe(cmd, []string{})
+		serverDone <- cmd.GetRunServe()(cobraCmd, []string{})
 	}()
 
 	// Wait for server to start
@@ -85,16 +88,16 @@ func TestServerGracefulShutdown(t *testing.T) {
 
 	port := findFreePort(t)
 
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", port, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
+	cobraCmd.Flags().Uint16P("port", "p", port, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- runServe(cmd, []string{})
+		serverDone <- cmd.GetRunServe()(cobraCmd, []string{})
 	}()
 
 	// Wait for server to start
@@ -151,14 +154,14 @@ func TestServerStartupError(t *testing.T) {
 	}
 
 	// Try to bind to a privileged port (should fail without root)
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", 80, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{"--port=80"})
+	cobraCmd.Flags().Uint16P("port", "p", 80, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{"--port=80"})
 
-	err := runServe(cmd, []string{})
+	err := cmd.GetRunServe()(cobraCmd, []string{})
 
 	// Should fail (unless running as root, which is unlikely in tests)
 	if os.Geteuid() != 0 {
@@ -175,16 +178,16 @@ func TestServerConcurrentRequests(t *testing.T) {
 
 	port := findFreePort(t)
 
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", port, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
+	cobraCmd.Flags().Uint16P("port", "p", port, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- runServe(cmd, []string{})
+		serverDone <- cmd.GetRunServe()(cobraCmd, []string{})
 	}()
 
 	// Wait for server to start
@@ -252,16 +255,16 @@ func TestServerTimeouts(t *testing.T) {
 
 	port := findFreePort(t)
 
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", port, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
+	cobraCmd.Flags().Uint16P("port", "p", port, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- runServe(cmd, []string{})
+		serverDone <- cmd.GetRunServe()(cobraCmd, []string{})
 	}()
 
 	// Wait for server to start
@@ -328,19 +331,19 @@ func TestServerWithContext(t *testing.T) {
 
 	port := findFreePort(t)
 
-	cmd := &cobra.Command{
-		RunE: runServe,
+	cobraCmd := &cobra.Command{
+		RunE: cmd.GetRunServe(),
 	}
-	cmd.Flags().Uint16P("port", "p", port, "Port to listen on")
-	cmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
-	cmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
+	cobraCmd.Flags().Uint16P("port", "p", port, "Port to listen on")
+	cobraCmd.Flags().StringP("host", "H", "127.0.0.1", "Host to bind to")
+	cobraCmd.SetArgs([]string{fmt.Sprintf("--port=%d", port)})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- runServe(cmd, []string{})
+		serverDone <- cmd.GetRunServe()(cobraCmd, []string{})
 	}()
 
 	// Wait for server to start

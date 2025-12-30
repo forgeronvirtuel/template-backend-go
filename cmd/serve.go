@@ -47,3 +47,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv := server.New(cfg.Server.Address(), router)
 	return srv.Start()
 }
+
+// GetRunServe returns the runServe function for testing purposes
+func GetRunServe() func(*cobra.Command, []string) error {
+	return runServe
+}

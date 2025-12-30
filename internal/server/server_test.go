@@ -1,5 +1,4 @@
 package server
-package server
 
 import (
 	"net/http"
@@ -152,15 +151,15 @@ func TestServerWithHandler(t *testing.T) {
 	})
 
 	srv := New("localhost:0", router)
-	
+
 	// Verify handler is set correctly
 	assert.NotNil(t, srv.httpServer.Handler)
-	
+
 	// Test handler with httptest
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/ping", nil)
 	srv.httpServer.Handler.ServeHTTP(w, req)
-	
+
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "pong")
 }
