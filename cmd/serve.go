@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var serveCmd = &cobra.Command{
@@ -27,12 +28,25 @@ func init() {
 	// Define flags for the serve command
 	serveCmd.Flags().Uint16P("port", "p", 8080, "Port to listen on")
 	serveCmd.Flags().StringP("host", "H", "0.0.0.0", "Host to bind to")
+
+	// Bind flags to viper
+	viper.BindPFlag("server.port", serveCmd.Flags().Lookup("port"))
+	viper.BindPFlag("server.host", serveCmd.Flags().Lookup("host"))
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	// Get flag values
-	port, _ := cmd.Flags().GetUint16("port")
-	host, _ := cmd.Flags().GetString("host")
+	// Get configuration values with priority: flags > config file > defaults
+	// Viper automatically handles the priority when flags are bound
+	port := uint16(viper.GetInt("server.port"))
+	host := viper.GetString("server.host")
+
+	// Fallback to defaults if not set anywhere
+	if port == 0 {
+		port = 8080
+	}
+	if host == "" {
+		host = "0.0.0.0"
+	}
 
 	// Set Gin mode (release, debug, test)
 	gin.SetMode(gin.ReleaseMode)

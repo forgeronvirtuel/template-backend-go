@@ -22,12 +22,65 @@ go build -o app .
 
 # Spécifier un host et un port
 ./app serve --host localhost --port 3000
+
+# Utiliser un fichier de configuration personnalisé
+./app serve --config /path/to/custom.yaml
 ```
 
 ### Options disponibles
 
+**Flags de commande :**
+
 - `-p, --port`: Port d'écoute (défaut: 8080)
 - `-H, --host`: Host à binder (défaut: 0.0.0.0)
+
+**Flags globaux :**
+
+- `--config`: Chemin vers le fichier de configuration (défaut: ./config.yaml)
+
+### Configuration
+
+L'application supporte plusieurs méthodes de configuration avec l'ordre de priorité suivant :
+
+1. **🥇 Flags en ligne de commande** (priorité maximale)
+2. **🥈 Fichier de configuration** (`config.yaml`)
+3. **🥉 Valeurs par défaut**
+
+#### Fichier de configuration
+
+Créez un fichier `config.yaml` à la racine du projet :
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+```
+
+Un fichier d'exemple est disponible : `config.example.yaml`
+
+```bash
+# Copier l'exemple et personnaliser
+cp config.example.yaml config.yaml
+```
+
+#### Exemples de configuration
+
+```bash
+# 1. Avec fichier config.yaml (port: 9000)
+./app serve
+# → Démarre sur le port 9000
+
+# 2. Flag override config
+./app serve --port 3000
+# → Démarre sur le port 3000 (le flag a priorité)
+
+# 3. Sans config.yaml (valeurs par défaut)
+rm config.yaml && ./app serve
+# → Démarre sur le port 8080
+
+# 4. Fichier de config personnalisé
+./app serve --config /etc/myapp/config.yaml
+```
 
 ## Endpoints API
 
@@ -119,6 +172,8 @@ go run main.go serve
 
 - ✅ CLI avec Cobra
 - ✅ Serveur HTTP avec Gin
+- ✅ Configuration par fichier YAML (Viper)
+- ✅ Priorité : flags > config file > defaults
 - ✅ Graceful shutdown
 - ✅ Middleware de logging et recovery
 - ✅ Gestion des erreurs
