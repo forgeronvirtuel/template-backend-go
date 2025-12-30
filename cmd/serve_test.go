@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	httpTransport "template-backend-go/internal/transport/http"
 )
 
 func init() {
@@ -17,10 +19,15 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+// setupTestRouter creates a router for testing
+func setupTestRouter() *gin.Engine {
+	handler := httpTransport.NewHandler()
+	return httpTransport.NewRouter(handler)
+}
+
 // TestHealthEndpoint tests the /health endpoint
 func TestHealthEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -38,8 +45,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 // TestWelcomeEndpoint tests the / endpoint
 func TestWelcomeEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
@@ -58,8 +64,7 @@ func TestWelcomeEndpoint(t *testing.T) {
 
 // TestHelloEndpoint tests the /api/v1/hello endpoint
 func TestHelloEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/hello", nil)
@@ -76,8 +81,7 @@ func TestHelloEndpoint(t *testing.T) {
 
 // TestGetUserEndpoint tests the /api/v1/users/:id endpoint
 func TestGetUserEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	tests := []struct {
 		name       string
@@ -119,8 +123,7 @@ func TestGetUserEndpoint(t *testing.T) {
 
 // TestCreateUserEndpoint tests the /api/v1/users POST endpoint
 func TestCreateUserEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	tests := []struct {
 		name       string
@@ -196,8 +199,7 @@ func TestCreateUserEndpoint(t *testing.T) {
 
 // TestNotFoundEndpoint tests 404 handling
 func TestNotFoundEndpoint(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
@@ -208,8 +210,7 @@ func TestNotFoundEndpoint(t *testing.T) {
 
 // TestMethodNotAllowed tests unsupported HTTP methods
 func TestMethodNotAllowed(t *testing.T) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	tests := []struct {
 		name   string
@@ -247,8 +248,7 @@ func TestMethodNotAllowed(t *testing.T) {
 
 // BenchmarkHealthEndpoint benchmarks the /health endpoint
 func BenchmarkHealthEndpoint(b *testing.B) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -262,8 +262,7 @@ func BenchmarkHealthEndpoint(b *testing.B) {
 
 // BenchmarkGetUserEndpoint benchmarks the /api/v1/users/:id endpoint
 func BenchmarkGetUserEndpoint(b *testing.B) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/users/123", nil)
@@ -277,8 +276,7 @@ func BenchmarkGetUserEndpoint(b *testing.B) {
 
 // BenchmarkCreateUserEndpoint benchmarks the /api/v1/users POST endpoint
 func BenchmarkCreateUserEndpoint(b *testing.B) {
-	router := gin.New()
-	setupRoutes(router)
+	router := setupTestRouter()
 
 	payload := map[string]interface{}{
 		"name":  "Jane Doe",

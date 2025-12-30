@@ -160,6 +160,38 @@ go test ./cmd -bench=BenchmarkHealthEndpoint -benchmem
 - ✅ Test de requêtes concurrentes
 - ✅ Test des timeouts
 
+## Architecture
+
+Le projet suit une architecture modulaire clean avec séparation des responsabilités :
+
+```
+template-backend-go/
+├── cmd/                          # Points d'entrée de l'application
+│   ├── root.go                   # Commande racine Cobra + config Viper
+│   ├── serve.go                  # Commande serve (orchestration)
+│   ├── serve_test.go             # Tests unitaires des endpoints
+│   └── integration_test.go       # Tests d'intégration serveur
+├── internal/                     # Packages internes (non exportables)
+│   ├── config/                   # Gestion de la configuration
+│   │   └── config.go             # Load, Validate, structs Config
+│   ├── server/                   # Lifecycle du serveur HTTP
+│   │   └── server.go             # Start, Shutdown, gestion signaux
+│   └── transport/http/           # Couche HTTP
+│       ├── handlers.go           # Handlers métier (Health, Users, etc.)
+│       └── router.go             # Configuration routes + middleware
+├── config.yaml                   # Configuration (gitignored)
+├── config.example.yaml           # Template de configuration
+├── main.go                       # Point d'entrée principal
+└── go.mod
+```
+
+### Principes de design
+
+- **Séparation des préoccupations** : Chaque package a une responsabilité unique
+- **Testabilité** : Toutes les couches sont facilement mockables
+- **Réutilisabilité** : Les packages `internal/` sont indépendants
+- **Standards Go** : Convention `internal/`, `cmd/`, exports clairs
+
 ## Développement
 
 Pour lancer en mode développement:
@@ -168,12 +200,26 @@ Pour lancer en mode développement:
 go run main.go serve
 ```
 
+### Ajouter un nouveau endpoint
+
+1. Ajouter le handler dans `internal/transport/http/handlers.go`
+2. Enregistrer la route dans `internal/transport/http/router.go`
+3. Ajouter les tests dans `cmd/serve_test.go`
+
+### Modifier la configuration
+
+1. Mettre à jour les structs dans `internal/config/config.go`
+2. Ajouter la validation dans `Config.Validate()`
+3. Mettre à jour `config.example.yaml`
+
 ## Fonctionnalités
 
 - ✅ CLI avec Cobra
 - ✅ Serveur HTTP avec Gin
+- ✅ Architecture modulaire (cmd, internal/config, internal/server, internal/transport)
 - ✅ Configuration par fichier YAML (Viper)
 - ✅ Priorité : flags > config file > defaults
+- ✅ Validation de configuration
 - ✅ Graceful shutdown
 - ✅ Middleware de logging et recovery
 - ✅ Gestion des erreurs
@@ -184,3 +230,34 @@ go run main.go serve
 - ✅ Protection contre Slowloris (ReadHeaderTimeout)
 - ✅ Gestion propre des signaux (SIGINT, SIGTERM)
 - ✅ Canal d'erreur bufferisé (pas de goroutine leak)
+
+## Structure du code
+
+### cmd/serve.go - Orchestration
+
+```go
+func runServe() error {
+    cfg := config.Load()           // Charge la configuration
+    handler := http.NewHandler()   // Crée les handlers métier
+    router := http.NewRouter()     // Configure le router
+    srv := server.New()            // Crée le serveur
+    return srv.Start()             // Démarre avec lifecycle
+}
+```
+
+### internal/config - Configuration
+
+- `Load()` : Charge depuis Viper (flags > file > defaults)
+- `Validate()` : Valide les valeurs (port, host)
+- Types `Config` et `ServerConfig` avec mapstructure
+
+### internal/transport/http - Couche HTTP
+
+- `handlers.go` : Logique métier (Health, Users, etc.)
+- `router.go` : Configuration des routes et middleware
+
+### internal/server - Lifecycle serveur
+
+- `New()` : Crée http.Server avec timeouts
+- `Start()` : Démarre + gestion des signaux
+- `Shutdown()` : Arrêt graceful avec timeout
