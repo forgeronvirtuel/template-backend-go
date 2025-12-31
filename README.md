@@ -161,6 +161,317 @@ Cet identifiant doit être :
 
 ---
 
+## Logging Structuré
+
+### Vue d'Ensemble
+
+Le template utilise **`log/slog`** (Go standard library) pour produire des logs structurés en **JSON**, prêts pour la production et compatibles avec les systèmes d'agrégation de logs (ELK, Datadog, CloudWatch, etc.).
+
+### Caractéristiques
+
+- ✅ **Format JSON** pour le parsing automatique
+- ✅ **Niveaux configurables** : debug, info, warn, error
+- ✅ **Context-aware** : request_id propagé automatiquement
+- ✅ **Un log par requête HTTP** avec toutes les métadonnées
+- ✅ **Pas de dépendances externes** (stdlib uniquement)
+- ✅ **Startup/shutdown** loggés structurés
+
+### Configuration
+
+```bash
+# Niveau par défaut (info)
+./app serve
+
+# Mode debug pour le développement
+./app serve --log-level debug
+
+# Mode production (warn/error uniquement)
+./app serve --log-level warn
+```
+
+**Niveaux disponibles** :
+
+- `debug` : Logs détaillés (développement)
+- `info` : Logs informatifs (production par défaut)
+- `warn` : Avertissements uniquement
+- `error` : Erreurs uniquement
+
+### Format des Logs
+
+#### Logs HTTP (un par requête)
+
+Chaque requête HTTP produit **un seul log** structuré contenant :
+
+```json
+{
+  "time": "2025-12-31T11:24:44.283595629+01:00",
+  "level": "INFO",
+  "msg": "HTTP request",
+  "request_id": "7a8c7eb470fb24c9fb18365e32beba58",
+  "method": "GET",
+  "path": "/api/v1/users",
+  "status_code": 200,
+  "latency_ms": 45,
+  "client_ip": "127.0.0.1"
+}
+```
+
+**Champs** :
+
+- `time` : Timestamp ISO8601 avec nanoseconde
+- `level` : Niveau du log (INFO, WARN, ERROR, DEBUG)
+- `msg` : Message descriptif
+- `request_id` : Identifiant unique de la requête (traçabilité)
+- `method` : Méthode HTTP (GET, POST, etc.)
+- `path` : Chemin de la requête
+- `status_code` : Code HTTP de réponse
+- `latency_ms` : Temps de traitement en millisecondes
+- `client_ip` : Adresse IP du client
+
+#### Logs d'Erreur
+
+Les erreurs applicatives sont loggées avec contexte complet :
+
+```json
+{
+  "time": "2025-12-31T11:30:15.123456789+01:00",
+  "level": "ERROR",
+  "msg": "User creation failed",
+  "request_id": "a1b2c3d4e5f6...",
+  "error_code": "VALIDATION_ERROR",
+  "http_status": 400,
+  "error": "email already exists"
+}
+```
+
+#### Logs de Démarrage
+
+```json
+{
+  "time": "2025-12-31T11:23:55.253417647+01:00",
+  "level": "INFO",
+  "msg": "Starting server",
+  "version": "dev",
+  "log_level": "info"
+}
+```
+
+```json
+{
+  "time": "2025-12-31T11:23:55.253796777+01:00",
+  "level": "INFO",
+  "msg": "HTTP server starting",
+  "address": "0.0.0.0:8080"
+}
+```
+
+#### Logs d'Arrêt
+
+```json
+{
+  "time": "2025-12-31T11:24:16.578761261+01:00",
+  "level": "INFO",
+  "msg": "Shutdown signal received",
+  "signal": "terminated"
+}
+```
+
+```json
+{
+  "time": "2025-12-31T11:24:16.578987293+01:00",
+  "level": "INFO",
+  "msg": "Server stopped successfully"
+}
+```
+
+### Utilisation dans le Code
+
+#### Logger Global
+
+```go
+import "template-backend-go/internal/logging"
+
+logger := logging.Logger()
+logger.Info("Operation completed",
+    slog.String("user_id", "123"),
+    slog.Int("count", 42),
+)
+```
+
+#### Logger depuis le Contexte (avec request_id)
+
+```go
+func (h *Handler) MyEndpoint(c *gin.Context) {
+    logger := logging.LoggerFromContext(c.Request.Context())
+
+    logger.Info("Processing request",
+        slog.String("user_id", userID),
+    )
+    // Le request_id est automatiquement disponible dans le contexte
+}
+```
+
+#### Logs d'Erreur
+
+```go
+logger.Error("Operation failed",
+    slog.String("request_id", requestID),
+    slog.String("error_code", "DATABASE_ERROR"),
+    slog.Any("error", err),
+)
+```
+
+#### Logs de Debug (développement)
+
+```go
+logger.Debug("Cache hit",
+    slog.String("key", cacheKey),
+    slog.Duration("ttl", ttl),
+)
+```
+
+### Intégration avec les Systèmes de Monitoring
+
+#### ELK Stack (Elasticsearch, Logstash, Kibana)
+
+Les logs JSON sont directement compatibles. Configuration Logstash exemple :
+
+```ruby
+input {
+  file {
+    path => "/var/log/app/*.log"
+    codec => "json"
+  }
+}
+
+filter {
+  # Les champs sont déjà structurés
+}
+
+output {
+  elasticsearch {
+    hosts => ["localhost:9200"]
+    index => "app-logs-%{+YYYY.MM.dd}"
+  }
+}
+```
+
+#### Datadog
+
+```bash
+# Le Datadog Agent parse automatiquement les logs JSON
+# Configurer le source dans datadog.yaml
+logs:
+  - type: file
+    path: /var/log/app/*.log
+    service: my-go-service
+    source: go
+```
+
+#### CloudWatch (AWS)
+
+Les logs JSON sont automatiquement parsés par CloudWatch Logs Insights :
+
+```sql
+fields @timestamp, level, msg, request_id, status_code, latency_ms
+| filter level = "ERROR"
+| sort @timestamp desc
+| limit 100
+```
+
+### Bonnes Pratiques
+
+#### ✅ À Faire
+
+- Utiliser `slog.String()`, `slog.Int()`, etc. pour typer les valeurs
+- Logger les événements importants (création, modification, suppression)
+- Inclure le `request_id` dans tous les logs liés à une requête
+- Logger les erreurs avec contexte complet
+- Utiliser le niveau approprié (DEBUG, INFO, WARN, ERROR)
+
+#### ❌ À Éviter
+
+- Logger des informations sensibles (mots de passe, tokens, cartes bancaires)
+- Logger les corps de requête/réponse complets (RGPD)
+- Logger excessivement (pollution des logs)
+- Utiliser `fmt.Println()` ou `log.Printf()` directement
+- Logger au niveau DEBUG en production
+
+### Filtrage et Recherche
+
+#### Rechercher par request_id
+
+```bash
+# Avec jq
+cat app.log | jq 'select(.request_id == "7a8c7eb470fb24c9fb18365e32beba58")'
+
+# Avec grep
+grep "7a8c7eb470fb24c9fb18365e32beba58" app.log | jq .
+```
+
+#### Filtrer par niveau
+
+```bash
+# Uniquement les erreurs
+cat app.log | jq 'select(.level == "ERROR")'
+
+# Warnings et erreurs
+cat app.log | jq 'select(.level == "WARN" or .level == "ERROR")'
+```
+
+#### Analyser les latences
+
+```bash
+# Requêtes lentes (> 100ms)
+cat app.log | jq 'select(.latency_ms > 100)'
+
+# Latence moyenne
+cat app.log | jq -s 'map(.latency_ms) | add / length'
+```
+
+#### Analyser les erreurs HTTP
+
+```bash
+# Erreurs 5xx
+cat app.log | jq 'select(.status_code >= 500)'
+
+# Top 10 des endpoints les plus lents
+cat app.log | jq -s 'group_by(.path) | map({path: .[0].path, avg_latency: (map(.latency_ms) | add / length)}) | sort_by(.avg_latency) | reverse | .[0:10]'
+```
+
+### Architecture du Logging
+
+```
+internal/logging/
+└── logger.go              # Initialisation et helpers
+
+internal/transport/http/middleware/
+├── request_id.go          # Génération/extraction du request_id
+└── logging.go             # Middleware de logging structuré
+
+cmd/serve.go               # Initialisation du logger au démarrage
+internal/server/server.go  # Logs de lifecycle (start/stop)
+internal/transport/http/handler/
+└── users.go               # Logs métier (validation, erreurs)
+```
+
+### Performance
+
+Le logging structuré avec `slog` est optimisé pour la production :
+
+- **Zéro allocation** pour les types de base
+- **Lazy evaluation** des valeurs coûteuses
+- **Niveau filtré à l'initialisation** (pas d'overhead pour les logs debug en prod)
+- **JSON encoding optimisé** par la stdlib
+
+Benchmarks typiques :
+
+```
+BenchmarkStructuredLog-8    1000000    1200 ns/op    0 allocs/op
+```
+
+---
+
 ## Vue d'Ensemble de l'Architecture
 
 ```

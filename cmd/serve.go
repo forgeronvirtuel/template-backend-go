@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,7 @@ import (
 	"template-backend-go/internal/buildinfo"
 	"template-backend-go/internal/config"
 	"template-backend-go/internal/health"
+	"template-backend-go/internal/logging"
 	"template-backend-go/internal/server"
 	"template-backend-go/internal/transport/http/handler"
 	"template-backend-go/internal/transport/http/router"
@@ -28,10 +30,12 @@ func init() {
 	// Define flags for the serve command
 	serveCmd.Flags().Uint16P("port", "p", 8080, "Port to listen on")
 	serveCmd.Flags().StringP("host", "H", "0.0.0.0", "Host to bind to")
+	serveCmd.Flags().StringP("log-level", "l", "info", "Log level (debug, info, warn, error)")
 
 	// Bind flags to viper
 	viper.BindPFlag("server.port", serveCmd.Flags().Lookup("port"))
 	viper.BindPFlag("server.host", serveCmd.Flags().Lookup("host"))
+	viper.BindPFlag("log.level", serveCmd.Flags().Lookup("log-level"))
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -43,10 +47,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if port, err := cmd.Flags().GetUint16("port"); err == nil {
 		viper.Set("server.port", port)
 	}
+	if logLevel, err := cmd.Flags().GetString("log-level"); err == nil {
+		viper.Set("log.level", logLevel)
+	}
+
+	// Initialize structured logging
+	logLevel := viper.GetString("log.level")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	logging.Init(logLevel)
+
+	logger := logging.Logger()
+	logger.Info("Starting server",
+		slog.String("version", buildinfo.Version),
+		slog.String("log_level", logLevel),
+	)
 
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
+		logger.Error("Failed to load configuration", slog.Any("error", err))
 		return err
 	}
 
@@ -71,8 +92,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	h := router.New(deps)
 
 	// Create and start server
+	logger.Info("HTTP server configured",
+		slog.String("address", cfg.Server.Address()),
+	)
+
 	srv := server.New(cfg.Server.Address(), h)
-	return srv.Start()
+	if err := srv.Start(); err != nil {
+		logger.Error("Server stopped with error", slog.Any("error", err))
+		return err
+	}
+
+	logger.Info("Server shutdown complete")
+	return nil
 }
 
 // GetRunServe returns the runServe function for testing purposes

@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"template-backend-go/internal/logging"
 )
 
 // Server wraps the HTTP server and manages its lifecycle
@@ -33,12 +35,16 @@ func New(addr string, handler http.Handler) *Server {
 
 // Start starts the HTTP server and handles graceful shutdown
 func (s *Server) Start() error {
+	logger := logging.Logger()
+
 	// Channel to capture server errors
 	serverErrors := make(chan error, 1)
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Server starting on http://%s", s.httpServer.Addr)
+		logger.Info("HTTP server starting",
+			slog.String("address", s.httpServer.Addr),
+		)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErrors <- err
 		}
@@ -51,9 +57,12 @@ func (s *Server) Start() error {
 
 	select {
 	case err := <-serverErrors:
+		logger.Error("Failed to start server", slog.Any("error", err))
 		return fmt.Errorf("failed to start server: %w", err)
-	case <-quit:
-		log.Println("Shutting down server...")
+	case sig := <-quit:
+		logger.Info("Shutdown signal received",
+			slog.String("signal", sig.String()),
+		)
 	}
 
 	// Graceful shutdown
@@ -62,14 +71,19 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown() error {
+	logger := logging.Logger()
+	logger.Info("Initiating graceful shutdown")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
-		log.Printf("Error during server shutdown: %v", err)
+		logger.Error("Error during server shutdown",
+			slog.Any("error", err),
+		)
 		return err
 	}
 
-	log.Println("Server stopped")
+	logger.Info("Server stopped successfully")
 	return nil
 }
