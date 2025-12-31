@@ -83,7 +83,7 @@ func (a *Aggregator) Run(ctx context.Context) Summary {
 	wg.Add(len(a.checks))
 
 	for idx, check := range a.checks {
-		go func() {
+		go func(idx int, check ReadinessCheck) {
 			defer wg.Done()
 
 			checkCtx, cancel := context.WithTimeout(ctx, a.perCheckTimeout)
@@ -101,7 +101,7 @@ func (a *Aggregator) Run(ctx context.Context) Summary {
 				res.Status = CheckStatusOK
 			}
 			out.Checks[idx] = res
-		}()
+		}(idx, check)
 	}
 
 	wg.Wait()

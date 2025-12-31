@@ -19,6 +19,7 @@ func New(d Deps) *gin.Engine {
 	// Keep gin.Logger() if you want; ideally replace with structured logger middleware later.
 	r.Use(gin.Logger())
 
+	// Fail fast if required handlers are missing.
 	if d.Health == nil {
 		panic("router: Health handler is required")
 	}

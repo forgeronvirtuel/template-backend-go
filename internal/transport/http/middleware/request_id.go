@@ -24,8 +24,19 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
-func newRequestID() string {
+func newRequestID() (string, []error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	errors := []error{}
+	for i := 0; i < 3; i++ {
+		_, err := rand.Read(b[:])
+		if err != nil {
+			errors = append(errors, err)
+		} else {
+			break
+		}
+	}
+	if len(errors) > 0 {
+		return "", errors
+	}
+	return hex.EncodeToString(b[:]), nil
 }

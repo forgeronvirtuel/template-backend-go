@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -42,7 +44,9 @@ func (h *HealthHandler) Live(c *gin.Context) {
 
 // Readiness probe: dependencies are ready
 func (h *HealthHandler) Ready(c *gin.Context) {
-	summary := h.readiness.Run(c.Request.Context())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	summary := h.readiness.Run(ctx)
 
 	statusCode := http.StatusOK
 	if !summary.Ready {
