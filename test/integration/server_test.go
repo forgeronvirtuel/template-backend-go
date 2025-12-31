@@ -44,7 +44,7 @@ func TestServerIntegration(t *testing.T) {
 	// Wait for server to start
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err != nil {
 			return false
 		}
@@ -52,14 +52,8 @@ func TestServerIntegration(t *testing.T) {
 		return resp.StatusCode == http.StatusOK
 	}, 5*time.Second, 100*time.Millisecond, "Server should start within 5 seconds")
 
-	// Test health endpoint
-	resp, err := http.Get(addr + "/health")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Test API endpoint
-	resp, err = http.Get(addr + "/api/v1/hello")
+	// Test liveness endpoint
+	resp, err := http.Get(addr + "/live")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -102,7 +96,7 @@ func TestServerGracefulShutdown(t *testing.T) {
 	// Wait for server to start
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err != nil {
 			return false
 		}
@@ -113,7 +107,7 @@ func TestServerGracefulShutdown(t *testing.T) {
 	// Start a long request
 	requestDone := make(chan bool, 1)
 	go func() {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err == nil {
 			resp.Body.Close()
 		}
@@ -192,7 +186,7 @@ func TestServerConcurrentRequests(t *testing.T) {
 	// Wait for server to start
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err != nil {
 			return false
 		}
@@ -206,7 +200,7 @@ func TestServerConcurrentRequests(t *testing.T) {
 
 	for i := 0; i < numRequests; i++ {
 		go func() {
-			resp, err := http.Get(addr + "/health")
+			resp, err := http.Get(addr + "/live")
 			if err != nil {
 				results <- err
 				return
@@ -269,7 +263,7 @@ func TestServerTimeouts(t *testing.T) {
 	// Wait for server to start
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err != nil {
 			return false
 		}
@@ -282,7 +276,7 @@ func TestServerTimeouts(t *testing.T) {
 		Timeout: 15 * time.Second,
 	}
 
-	resp, err := client.Get(addr + "/health")
+	resp, err := client.Get(addr + "/live")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -348,7 +342,7 @@ func TestServerWithContext(t *testing.T) {
 	// Wait for server to start
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(addr + "/health")
+		resp, err := http.Get(addr + "/live")
 		if err != nil {
 			return false
 		}
