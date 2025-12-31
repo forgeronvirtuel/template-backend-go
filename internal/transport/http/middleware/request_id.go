@@ -14,7 +14,12 @@ func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rid := c.GetHeader(RequestIDHeader)
 		if rid == "" {
-			rid = newRequestID()
+			var errs []error
+			rid, errs = newRequestID()
+			if len(errs) > 0 {
+				// In case of error, fallback to a fixed string.
+				rid = "cannot-generate-request-id"
+			}
 		}
 
 		c.Set(RequestIDKey, rid)
