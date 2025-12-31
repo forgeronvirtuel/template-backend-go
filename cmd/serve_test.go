@@ -59,8 +59,28 @@ func TestLive_OK_MinimalJSON(t *testing.T) {
 	assert.False(t, hasChecks)
 }
 
-func TestReady_OK_WhenNoChecks(t *testing.T) {
+func TestReady_503_WhenNoChecks(t *testing.T) {
 	r := newTestRouter(nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var body struct {
+		Status health.SummaryStatus `json:"status"`
+		Checks []health.CheckResult `json:"checks"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, health.SummaryStatusNotReady, body.Status)
+	assert.Len(t, body.Checks, 0)
+}
+
+func TestReady_200_WhenCriticalCheckPasses(t *testing.T) {
+	r := newTestRouter([]health.ReadinessCheck{
+		testCheck{name: "db", critical: true, err: nil},
+	})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -69,12 +89,15 @@ func TestReady_OK_WhenNoChecks(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var body struct {
-		Status string               `json:"status"`
+		Status health.SummaryStatus `json:"status"`
 		Checks []health.CheckResult `json:"checks"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, "ok", body.Status)
-	assert.Len(t, body.Checks, 0)
+	assert.Equal(t, health.SummaryStatusOK, body.Status)
+	require.Len(t, body.Checks, 1)
+	assert.Equal(t, "db", body.Checks[0].Name)
+	assert.Equal(t, health.CheckStatusOK, body.Checks[0].Status)
+	assert.True(t, body.Checks[0].Critical)
 }
 
 func TestReady_503_WhenCriticalCheckFails(t *testing.T) {
@@ -89,14 +112,14 @@ func TestReady_503_WhenCriticalCheckFails(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 
 	var body struct {
-		Status string               `json:"status"`
+		Status health.SummaryStatus `json:"status"`
 		Checks []health.CheckResult `json:"checks"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, "not_ready", body.Status)
+	assert.Equal(t, health.SummaryStatusNotReady, body.Status)
 	require.Len(t, body.Checks, 1)
 	assert.Equal(t, "db", body.Checks[0].Name)
-	assert.Equal(t, "fail", body.Checks[0].Status)
+	assert.Equal(t, health.CheckStatusFail, body.Checks[0].Status)
 	assert.True(t, body.Checks[0].Critical)
 	assert.NotEmpty(t, body.Checks[0].Error)
 }
@@ -113,13 +136,13 @@ func TestReady_200_WhenNonCriticalCheckFails(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var body struct {
-		Status string               `json:"status"`
+		Status health.SummaryStatus `json:"status"`
 		Checks []health.CheckResult `json:"checks"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, "ok", body.Status)
+	assert.Equal(t, health.SummaryStatusOK, body.Status)
 	require.Len(t, body.Checks, 1)
 	assert.Equal(t, "cache", body.Checks[0].Name)
-	assert.Equal(t, "fail", body.Checks[0].Status)
+	assert.Equal(t, health.CheckStatusFail, body.Checks[0].Status)
 	assert.False(t, body.Checks[0].Critical)
 }

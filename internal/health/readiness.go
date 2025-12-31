@@ -6,6 +6,22 @@ import (
 	"time"
 )
 
+// CheckStatus represents the status of an individual readiness check.
+type CheckStatus string
+
+const (
+	CheckStatusOK   CheckStatus = "ok"
+	CheckStatusFail CheckStatus = "fail"
+)
+
+// SummaryStatus represents the overall readiness status.
+type SummaryStatus string
+
+const (
+	SummaryStatusOK       SummaryStatus = "ok"
+	SummaryStatusNotReady SummaryStatus = "not_ready"
+)
+
 // ReadinessCheck represents a dependency check used by the /ready endpoint.
 // Critical checks failing make the service NOT ready (HTTP 503).
 // Non-critical checks failing do not block readiness (HTTP 200).
@@ -16,15 +32,15 @@ type ReadinessCheck interface {
 }
 
 type CheckResult struct {
-	Name     string `json:"name"`
-	Status   string `json:"status"` // "ok" | "fail"
-	Critical bool   `json:"critical"`
-	Error    string `json:"error,omitempty"`
+	Name     string      `json:"name"`
+	Status   CheckStatus `json:"status"`
+	Critical bool        `json:"critical"`
+	Error    string      `json:"error,omitempty"`
 }
 
 type Summary struct {
 	Ready  bool          `json:"-"`
-	Status string        `json:"status"` // "ok" | "not_ready"
+	Status SummaryStatus `json:"status"`
 	Checks []CheckResult `json:"checks"`
 }
 
@@ -49,13 +65,16 @@ func NewReadinessAggregator(checks []ReadinessCheck, perCheckTimeout time.Durati
 }
 
 func (a *Aggregator) Run(ctx context.Context) Summary {
-	// Default to ready when there are no checks.
 	out := Summary{
 		Ready:  true,
-		Status: "ok",
+		Status: SummaryStatusOK,
 		Checks: make([]CheckResult, len(a.checks)),
 	}
+
+	// Policy: if no readiness checks are registered, the service is NOT ready.
 	if len(a.checks) == 0 {
+		out.Ready = false
+		out.Status = SummaryStatusNotReady
 		out.Checks = []CheckResult{}
 		return out
 	}
@@ -64,9 +83,6 @@ func (a *Aggregator) Run(ctx context.Context) Summary {
 	wg.Add(len(a.checks))
 
 	for idx, check := range a.checks {
-		idx := idx
-		check := check
-
 		go func() {
 			defer wg.Done()
 
@@ -79,10 +95,10 @@ func (a *Aggregator) Run(ctx context.Context) Summary {
 				Critical: check.Critical(),
 			}
 			if err != nil {
-				res.Status = "fail"
+				res.Status = CheckStatusFail
 				res.Error = err.Error()
 			} else {
-				res.Status = "ok"
+				res.Status = CheckStatusOK
 			}
 			out.Checks[idx] = res
 		}()
@@ -92,9 +108,9 @@ func (a *Aggregator) Run(ctx context.Context) Summary {
 
 	// Aggregate readiness: only critical failures make it not ready.
 	for _, r := range out.Checks {
-		if r.Status == "fail" && r.Critical {
+		if r.Status == CheckStatusFail && r.Critical {
 			out.Ready = false
-			out.Status = "not_ready"
+			out.Status = SummaryStatusNotReady
 			break
 		}
 	}
