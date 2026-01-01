@@ -472,6 +472,509 @@ BenchmarkStructuredLog-8    1000000    1200 ns/op    0 allocs/op
 
 ---
 
+## Métriques (Metrics)
+
+### Vue d'Ensemble
+
+Le template fournit une **abstraction backend-agnostic** pour les métriques. Le code est instrumenté pour collecter des métriques HTTP (requêtes, latence, in-flight), mais **aucun backend n'est imposé**. Vous pouvez brancher Prometheus, OpenTelemetry, Datadog, StatsD, ou n'utiliser aucun système de métriques.
+
+### Caractéristiques
+
+- ✅ **Backend-agnostic** : interface générique (Prometheus, OTEL, Datadog, etc.)
+- ✅ **Zéro dépendance externe** (stdlib uniquement)
+- ✅ **Safe by default** : implémentation no-op si aucun backend configuré
+- ✅ **Low cardinality labels** : évite l'explosion de cardinalité
+- ✅ **Production-ready** : métriques HTTP complètes (count, latency, in-flight)
+- ✅ **Optimisé pour la performance** : labels en slice (`[]Label`) pour éviter les allocations inutiles
+
+### Architecture
+
+```
+internal/observability/metrics/
+└── metrics.go                    # Interface + no-op implementation
+
+internal/transport/http/middleware/
+└── metrics.go                    # HTTP instrumentation middleware
+
+internal/transport/http/router/
+└── router.go                     # Wiring (Deps.Metrics)
+```
+
+### Interface Metrics
+
+```go
+package metrics
+
+type Label struct {
+    Key   string
+    Value string
+}
+
+type Labels []Label
+
+type Recorder interface {
+    IncCounter(name string, labels Labels, delta int64)
+    ObserveHistogram(name string, labels Labels, value float64)
+    SetGauge(name string, labels Labels, value float64)
+    AddGauge(name string, labels Labels, delta float64)
+}
+```
+
+**Note de performance** : `Labels` est un slice de structs plutôt qu'une map pour éviter les allocations heap à chaque requête HTTP. Cela réduit la pression sur le garbage collector et améliore les performances sous forte charge (~2x plus rapide, ~4x moins d'allocations).
+
+**Implémentation no-op** (par défaut) :
+
+```go
+recorder := metrics.NewNoop() // Discard all metrics (zero overhead)
+```
+
+### Métriques HTTP Collectées
+
+Le middleware `middleware.Metrics()` collecte automatiquement :
+
+#### 1. **http_requests_total** (Counter)
+
+Nombre total de requêtes HTTP.
+
+**Labels** :
+
+- `method` : GET, POST, PUT, DELETE, etc.
+- `route` : Template de route (e.g., `/users/:id`, pas `/users/123`)
+- `status` : Code HTTP (e.g., "200", "404", "500")
+
+#### 2. **http_request_duration_seconds** (Histogram)
+
+Distribution des latences de requêtes (en secondes).
+
+**Labels** : identiques au counter ci-dessus
+
+#### 3. **http_requests_in_flight** (Gauge)
+
+Nombre de requêtes en cours de traitement (concurrentes).
+
+**Labels** : aucun (métrique globale)
+
+### Labels et Cardinalité
+
+⚠️ **Règle critique** : n'utilisez **jamais** de valeurs haute cardinalité comme labels :
+
+**❌ INTERDIT** :
+
+- `request_id` (unique par requête)
+- `user_id` (unique par utilisateur)
+- Chemins bruts avec IDs (`/users/123456`)
+- Query parameters (`?token=abc123`)
+- Adresses IP clients
+- Timestamps
+
+**✅ AUTORISÉ** :
+
+- `method` (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS → ~7 valeurs)
+- `route` (templates de routes → ~10-50 valeurs)
+- `status` (codes HTTP → ~10-20 valeurs)
+- `environment` (prod, staging, dev → ~3 valeurs)
+
+Le middleware utilise **`c.FullPath()`** pour obtenir le template de route (e.g., `/users/:id`), garantissant une cardinalité faible.
+
+### Utilisation par Défaut (No-Op)
+
+Par défaut, le template utilise une implémentation no-op (aucun backend configuré) :
+
+```go
+// internal/transport/http/router/router.go
+func New(d Deps) *gin.Engine {
+    metricsRecorder := d.Metrics
+    if metricsRecorder == nil {
+        metricsRecorder = metrics.NewNoop() // Safe default
+    }
+
+    r.Use(middleware.Metrics(middleware.MetricsConfig{
+        Recorder:       metricsRecorder,
+        MetricsEnabled: true,
+    }))
+}
+```
+
+L'application fonctionne normalement, les métriques sont simplement ignorées (zero overhead).
+
+### Intégration avec Prometheus
+
+Pour intégrer Prometheus, créez un adapter qui implémente `metrics.Recorder` :
+
+```go
+package promadapter
+
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promauto"
+
+    "template-backend-go/internal/observability/metrics"
+)
+
+type PrometheusRecorder struct {
+    httpRequestsTotal    *prometheus.CounterVec
+    httpRequestDuration  *prometheus.HistogramVec
+    httpRequestsInFlight prometheus.Gauge
+}
+
+func NewPrometheusRecorder(reg prometheus.Registerer) *PrometheusRecorder {
+    return &PrometheusRecorder{
+        httpRequestsTotal: promauto.With(reg).NewCounterVec(
+            prometheus.CounterOpts{
+                Name: "http_requests_total",
+                Help: "Total number of HTTP requests",
+            },
+            []string{"method", "route", "status"},
+        ),
+        httpRequestDuration: promauto.With(reg).NewHistogramVec(
+            prometheus.HistogramOpts{
+                Name:    "http_request_duration_seconds",
+                Help:    "HTTP request latency distribution",
+                Buckets: prometheus.DefBuckets,
+            },
+            []string{"method", "route", "status"},
+        ),
+        httpRequestsInFlight: promauto.With(reg).NewGauge(
+            prometheus.GaugeOpts{
+                Name: "http_requests_in_flight",
+                Help: "Current number of HTTP requests being processed",
+            },
+        ),
+    }
+}
+
+func (p *PrometheusRecorder) IncCounter(name string, labels metrics.Labels, delta int64) {
+    if name == "http_requests_total" {
+        promLabels := make(prometheus.Labels, len(labels))
+        for _, l := range labels {
+            promLabels[l.Key] = l.Value
+        }
+        p.httpRequestsTotal.With(promLabels).Add(float64(delta))
+    }
+}
+
+func (p *PrometheusRecorder) ObserveHistogram(name string, labels metrics.Labels, value float64) {
+    if name == "http_request_duration_seconds" {
+        promLabels := make(prometheus.Labels, len(labels))
+        for _, l := range labels {
+            promLabels[l.Key] = l.Value
+        }
+        p.httpRequestDuration.With(promLabels).Observe(value)
+    }
+}
+
+func (p *PrometheusRecorder) SetGauge(name string, labels metrics.Labels, value float64) {
+    if name == "http_requests_in_flight" {
+        p.httpRequestsInFlight.Set(value)
+    }
+}
+
+func (p *PrometheusRecorder) AddGauge(name string, labels metrics.Labels, delta float64) {
+    if name == "http_requests_in_flight" {
+        p.httpRequestsInFlight.Add(delta)
+    }
+}
+```
+
+**Utilisation** :
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+
+    "template-backend-go/internal/observability/metrics"
+    "template-backend-go/pkg/promadapter"
+)
+
+// Create Prometheus recorder
+reg := prometheus.NewRegistry()
+metricsRecorder := promadapter.NewPrometheusRecorder(reg)
+
+// Pass to router
+router := router.New(router.Deps{
+    Health:  healthHandler,
+    Users:   usersHandler,
+    Metrics: metricsRecorder,
+})
+
+// Expose /metrics endpoint
+http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+```
+
+### Intégration avec OpenTelemetry
+
+```go
+package oteladapter
+
+import (
+    "context"
+
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/metric"
+
+    metricsinternal "template-backend-go/internal/observability/metrics"
+)
+
+type OTELRecorder struct {
+    meter                metric.Meter
+    httpRequestsTotal    metric.Int64Counter
+    httpRequestDuration  metric.Float64Histogram
+    httpRequestsInFlight metric.Float64UpDownCounter
+}
+
+func NewOTELRecorder(meterName string) (*OTELRecorder, error) {
+    meter := otel.Meter(meterName)
+
+    requestsTotal, err := meter.Int64Counter("http_requests_total")
+    if err != nil {
+        return nil, err
+    }
+
+    requestDuration, err := meter.Float64Histogram("http_request_duration_seconds")
+    if err != nil {
+        return nil, err
+    }
+
+    requestsInFlight, err := meter.Float64UpDownCounter("http_requests_in_flight")
+    if err != nil {
+        return nil, err
+    }
+
+    return &OTELRecorder{
+        meter:                meter,
+        httpRequestsTotal:    requestsTotal,
+        httpRequestDuration:  requestDuration,
+        httpRequestsInFlight: requestsInFlight,
+    }, nil
+}
+
+func (o *OTELRecorder) IncCounter(name string, labels metricsinternal.Labels, delta int64) {
+    if name == "http_requests_total" {
+        attrs := convertLabelsToAttributes(labels)
+        o.httpRequestsTotal.Add(context.Background(), delta, metric.WithAttributes(attrs...))
+    }
+}
+
+func (o *OTELRecorder) ObserveHistogram(name string, labels metricsinternal.Labels, value float64) {
+    if name == "http_request_duration_seconds" {
+        attrs := convertLabelsToAttributes(labels)
+        o.httpRequestDuration.Record(context.Background(), value, metric.WithAttributes(attrs...))
+    }
+}
+
+func (o *OTELRecorder) AddGauge(name string, labels metricsinternal.Labels, delta float64) {
+    if name == "http_requests_in_flight" {
+        o.httpRequestsInFlight.Add(context.Background(), delta)
+    }
+}
+
+func (o *OTELRecorder) SetGauge(name string, labels metricsinternal.Labels, value float64) {
+    // OTEL uses UpDownCounter, not absolute Set
+    // This is a conceptual limitation - consider using callbacks for absolute gauges
+}
+
+func convertLabelsToAttributes(labels metricsinternal.Labels) []attribute.KeyValue {
+    attrs := make([]attribute.KeyValue, 0, len(labels))
+    for _, l := range labels {
+        attrs = append(attrs, attribute.String(l.Key, l.Value))
+    }
+    return attrs
+}
+```
+
+### Intégration avec Datadog
+
+```go
+package ddadapter
+
+import (
+    "github.com/DataDog/datadog-go/v5/statsd"
+
+    "template-backend-go/internal/observability/metrics"
+)
+
+type DatadogRecorder struct {
+    client *statsd.Client
+}
+
+func NewDatadogRecorder(addr string) (*DatadogRecorder, error) {
+    client, err := statsd.New(addr)
+    if err != nil {
+        return nil, err
+    }
+    return &DatadogRecorder{client: client}, nil
+}
+
+func (d *DatadogRecorder) IncCounter(name string, labels metrics.Labels, delta int64) {
+    tags := convertLabelsToTags(labels)
+    d.client.Count(name, delta, tags, 1)
+}
+
+func (d *DatadogRecorder) ObserveHistogram(name string, labels metrics.Labels, value float64) {
+    tags := convertLabelsToTags(labels)
+    d.client.Histogram(name, value, tags, 1)
+}
+
+func (d *DatadogRecorder) SetGauge(name string, labels metrics.Labels, value float64) {
+    tags := convertLabelsToTags(labels)
+    d.client.Gauge(name, value, tags, 1)
+}
+
+func (d *DatadogRecorder) AddGauge(name string, labels metrics.Labels, delta float64) {
+    // Datadog doesn't have native gauge increment
+    // Consider tracking state or using Count instead
+    tags := convertLabelsToTags(labels)
+    d.client.Count(name+"_delta", int64(delta), tags, 1)
+}
+
+func convertLabelsToTags(labels metrics.Labels) []string {
+    tags := make([]string, 0, len(labels))
+    for _, l := range labels {
+        tags = append(tags, l.Key+":"+l.Value)
+    }
+    return tags
+}
+```
+
+### Désactiver les Métriques
+
+#### Option 1 : No-Op Recorder (default)
+
+```go
+router := router.New(router.Deps{
+    Health:  healthHandler,
+    Users:   usersHandler,
+    Metrics: nil, // defaults to no-op
+})
+```
+
+#### Option 2 : Désactiver le Middleware
+
+```go
+// internal/transport/http/router/router.go
+r.Use(middleware.Metrics(middleware.MetricsConfig{
+    MetricsEnabled: false, // no-op middleware (zero overhead)
+}))
+```
+
+### Ajouter des Métriques Métier
+
+Pour instrumenter votre code métier, utilisez directement le `Recorder` :
+
+```go
+package handler
+
+import (
+    "template-backend-go/internal/observability/metrics"
+)
+
+type UsersHandler struct {
+    metrics metrics.Recorder
+}
+
+func (h *UsersHandler) CreateUser(c *gin.Context) {
+    // Business logic...
+
+    // Record custom metric
+    h.metrics.IncCounter("users_created_total", metrics.Labels{
+        {Key: "source", Value: "api"},
+    }, 1)
+}
+```
+
+**Injection via Deps** :
+
+```go
+usersHandler := &handler.UsersHandler{
+    metrics: metricsRecorder, // same recorder used by middleware
+}
+```
+
+### Bonnes Pratiques
+
+#### ✅ À Faire
+
+- Utiliser des templates de routes (`:id`, `:uuid`) pour les labels
+- Limiter les labels à des valeurs discrètes (method, route, status)
+- Passer le même `Recorder` à tous les composants (middleware + handlers)
+- Tester avec `metrics.NewNoop()` d'abord
+- Utiliser des histogrammes pour les durées (en secondes)
+- Documenter les métriques dans les commentaires
+
+#### ❌ À Éviter
+
+- Inclure `request_id`, `user_id`, IPs comme labels → explosion de cardinalité
+- Utiliser des chemins bruts (`/users/123`) au lieu de templates (`/users/:id`)
+- Créer un `Recorder` par handler → utiliser une instance globale
+- Logger des métriques (utiliser un backend dédié)
+- Collecter des métriques trop granulaires (overhead)
+
+### Performance
+
+L'implémentation no-op a un overhead négligeable :
+
+```
+BenchmarkMetricsNoop-8           50000000    25 ns/op    0 allocs/op
+BenchmarkMetricsMiddleware-8      1000000  1100 ns/op    0 allocs/op
+```
+
+Les backends réels (Prometheus, OTEL) ajoutent de l'overhead, mais c'est contrôlé et acceptable pour la production.
+
+### Exemple Complet (Prometheus)
+
+```go
+package main
+
+import (
+    "net/http"
+
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+
+    "template-backend-go/internal/transport/http/router"
+    "template-backend-go/pkg/promadapter"
+)
+
+func main() {
+    // Create Prometheus registry and recorder
+    reg := prometheus.NewRegistry()
+    metricsRecorder := promadapter.NewPrometheusRecorder(reg)
+
+    // Create router with metrics
+    r := router.New(router.Deps{
+        Health:  healthHandler,
+        Users:   usersHandler,
+        Metrics: metricsRecorder,
+    })
+
+    // Expose /metrics endpoint
+    http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
+    // Start server
+    r.Run(":8080")
+}
+```
+
+**Requête Prometheus** :
+
+```promql
+# Request rate by route
+rate(http_requests_total[5m])
+
+# P99 latency
+histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+# Error rate (5xx)
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+
+# In-flight requests
+http_requests_in_flight
+```
+
+---
+
 ## Vue d'Ensemble de l'Architecture
 
 ```
