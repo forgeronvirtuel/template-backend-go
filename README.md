@@ -201,6 +201,58 @@ Pour exécuter tous les tests :
 go test ./...
 ```
 
+## Authentification (optionnelle)
+
+Le template fournit une capacité d'authentification **optionnelle** et
+**vendor-neutral** pour protéger les routes business.
+
+### Comportement par défaut (strict mode)
+- Par défaut, l'authentification est **désactivée**.
+- Les routes protégées (ex. `POST /api/v1/users`) retournent **HTTP 401**
+  même si l'auth est désactivée (politique de sécurité stricte).
+- Les endpoints opérationnels `/live` et `/ready` restent **publics**.
+
+### Activation via configuration
+
+Éditer `config.yaml` :
+```yaml
+auth:
+  enabled: true
+  api_keys:
+    - "your-secret-key-here"
+```
+
+Ou via variables d'environnement :
+```bash
+AUTH_ENABLED=true AUTH_API_KEYS=key1,key2
+```
+
+### Utilisation
+
+Les clients doivent fournir la clé API dans :
+- Header `Authorization: Bearer <key>`
+- Ou header `X-API-Key: <key>`
+
+Exemple :
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Authorization: Bearer your-secret-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","name":"Test"}'
+```
+
+### Détails techniques
+
+- Stdlib uniquement (aucune dépendance externe).
+- Interface `auth.Authenticator` permet d'implémenter JWT, OAuth2, etc.
+- Implémentations fournies : `DisabledAuthenticator` (strict 401), `APIKeyAuthenticator`.
+- Erreurs d'auth suivent le contrat API métier (`error/meta` avec `request_id`).
+
+**Documentation complète :** voir [docs/05-authentication.md](docs/05-authentication.md)
+
+**Note sécurité :** `APIKeyAuthenticator` utilise des clés statiques.
+Pour production, implémenter JWT ou OAuth2 via l'interface `Authenticator`.
+
 ## Roadmap / TODO
 
 Le fichier `TODO.md` à la racine contient les tâches à réaliser. Certains

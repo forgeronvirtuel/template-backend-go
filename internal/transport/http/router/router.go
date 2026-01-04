@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"template-backend-go/internal/observability/metrics"
+	"template-backend-go/internal/security/auth"
 	"template-backend-go/internal/transport/http/handler"
 	"template-backend-go/internal/transport/http/middleware"
 )
@@ -11,7 +12,8 @@ import (
 type Deps struct {
 	Users   *handler.UsersHandler
 	Health  *handler.HealthHandler
-	Metrics metrics.Recorder // Optional: metrics backend (nil defaults to no-op)
+	Metrics metrics.Recorder   // Optional: metrics backend (nil defaults to no-op)
+	Auth    auth.Authenticator // Optional: authenticator (nil defaults to strict disabled mode)
 }
 
 func New(d Deps) *gin.Engine {
@@ -29,6 +31,13 @@ func New(d Deps) *gin.Engine {
 		metricsRecorder = metrics.NewNoop()
 	}
 
+	// Default to strict disabled authenticator if not provided
+	// This ensures protected routes return 401 by default (strict mode)
+	authenticator := d.Auth
+	if authenticator == nil {
+		authenticator = auth.NewDisabledAuthenticator()
+	}
+
 	// Apply request ID middleware globally
 	r.Use(middleware.RequestID())
 
@@ -41,13 +50,20 @@ func New(d Deps) *gin.Engine {
 		MetricsEnabled: true,
 	}))
 
+	// Operational endpoints (public, no auth)
 	r.GET("/live", d.Health.Live)
 	r.GET("/ready", d.Health.Ready)
 
+	// Business API v1
 	v1 := r.Group("/api/v1")
 	{
-		if d.Users != nil {
-			v1.POST("/users", d.Users.CreateUser)
+		// Protected routes require authentication
+		protected := v1.Group("")
+		protected.Use(middleware.Auth(authenticator))
+		{
+			if d.Users != nil {
+				protected.POST("/users", d.Users.CreateUser)
+			}
 		}
 	}
 

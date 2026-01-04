@@ -12,9 +12,34 @@ server:
 
   # Port to listen on (1-65535)
   port: 8080
+
+# Authentication configuration
+auth:
+  # Enable authentication (default: false)
+  # When false, protected routes return 401 (strict mode)
+  enabled: false
+
+  # API keys for authentication (when enabled: true)
+  # Supports both formats:
+  # 1. List of keys:
+  # api_keys:
+  #   - "key1"
+  #   - "key2"
+  # 2. Comma-separated string:
+  # api_keys: "key1,key2,key3"
+  #
+  # Clients must provide the key in one of:
+  #   - Authorization: Bearer <key>
+  #   - X-API-Key: <key>
+  #
+  # IMPORTANT: Do not commit real API keys to version control!
+  # api_keys:
+  #   - "your-secret-key-here"
 # You can also set these via environment variables:
 # SERVER_HOST=localhost
 # SERVER_PORT=3000
+# AUTH_ENABLED=true
+# AUTH_API_KEYS=key1,key2
 
 # Priority order (highest to lowest):
 # 1. Command-line flags: --host localhost --port 3000

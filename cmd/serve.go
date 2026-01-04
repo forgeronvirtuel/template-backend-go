@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ import (
 	"template-backend-go/internal/config"
 	"template-backend-go/internal/health"
 	"template-backend-go/internal/logging"
+	"template-backend-go/internal/security/auth"
 	"template-backend-go/internal/server"
 	"template-backend-go/internal/transport/http/handler"
 	"template-backend-go/internal/transport/http/router"
@@ -74,6 +76,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Set Gin mode
 	gin.SetMode(gin.ReleaseMode)
 
+	// Configure authentication
+	authenticator := configureAuth(logger)
+
 	// Wire HTTP handlers and router
 	readiness := health.NewReadinessAggregator(
 		nil,           // add checks here (DB ping, cache ping, etc.)
@@ -85,6 +90,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			Version:   buildinfo.Version,
 			Readiness: readiness,
 		}),
+		Auth: authenticator,
 		// Users is intentionally not wired in this template entrypoint yet.
 		// Add your application service and pass handler.NewUsersHandler(...) here.
 	}
@@ -109,4 +115,50 @@ func runServe(cmd *cobra.Command, args []string) error {
 // GetRunServe returns the runServe function for testing purposes
 func GetRunServe() func(*cobra.Command, []string) error {
 	return runServe
+}
+
+// configureAuth builds an Authenticator based on configuration.
+// Implements strict mode: if auth is disabled or misconfigured, returns DisabledAuthenticator (always 401).
+func configureAuth(logger *slog.Logger) auth.Authenticator {
+	enabled := viper.GetBool("auth.enabled")
+
+	if !enabled {
+		logger.Info("Authentication disabled (strict mode: protected routes will return 401)")
+		return auth.NewDisabledAuthenticator()
+	}
+
+	// Auth is enabled: load API keys
+	// Support both single string and list of strings
+	var keys []string
+
+	// Try as string slice first
+	if viper.IsSet("auth.api_keys") {
+		keys = viper.GetStringSlice("auth.api_keys")
+	}
+
+	// If empty, try as single string (comma-separated)
+	if len(keys) == 0 {
+		singleKey := viper.GetString("auth.api_keys")
+		if singleKey != "" {
+			// Support comma-separated keys in single string
+			parts := strings.Split(singleKey, ",")
+			for _, p := range parts {
+				trimmed := strings.TrimSpace(p)
+				if trimmed != "" {
+					keys = append(keys, trimmed)
+				}
+			}
+		}
+	}
+
+	if len(keys) == 0 {
+		logger.Warn("Authentication enabled but no API keys configured (strict mode: protected routes will return 401)")
+		return auth.NewDisabledAuthenticator()
+	}
+
+	logger.Info("Authentication enabled",
+		slog.Int("key_count", len(keys)),
+	)
+
+	return auth.NewAPIKeyAuthenticator(keys)
 }
