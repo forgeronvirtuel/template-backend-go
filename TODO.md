@@ -1,2 +1,0 @@
-- [ ] Add the possibility to set the request id into the http header (X-Request-Id)
-- [ ] Add a config field to transmit the X-Request-Id into the configuration file
